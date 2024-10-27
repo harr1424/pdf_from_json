@@ -1,28 +1,33 @@
+use genpdf::{elements, style, Alignment, Element};
 use indicatif::{ProgressBar, ProgressStyle};
-use printpdf::{
-    BuiltinFont, ColorBits, ImageTransform, ImageXObject, Mm, PdfDocument, PdfDocumentReference,
-    PdfLayerIndex, PdfPageIndex, Px,
-};
-use reqwest::blocking;
 use serde::Deserialize;
 use std::fs::File;
+use chrono::NaiveDate;
 
 #[derive(Debug, Deserialize)]
 struct Post {
     title: String,
     content: String,
     date: String,
-    images: Vec<String>,
+    // images: Vec<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let posts: Vec<Post> = serde_json::from_reader(File::open("backup.json")?)?;
-    let (doc, _, _) = PdfDocument::new(
-        "Gnostic Esoteric Study & Work Aids",
-        Mm(210.0),
-        Mm(297.0),
-        "Base Layer",
-    );
+    let mut posts: Vec<Post> = serde_json::from_reader(File::open("backup.json")?)?;
+    posts.sort_by_key(|post| {
+        NaiveDate::parse_from_str(&post.date, "%A %d %B %Y").ok()
+    });
+    
+    let font_family =
+        genpdf::fonts::from_files("./fonts", "OpenSans", None).expect("Failed to load font family");
+
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(10);
+
+    let mut doc = genpdf::Document::new(font_family);
+    doc.set_paper_size(genpdf::PaperSize::A4);
+    doc.set_page_decorator(decorator);
+
     let bar = ProgressBar::new(posts.len() as u64);
     bar.set_style(
         ProgressStyle::default_bar()
@@ -31,91 +36,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?
             .progress_chars("#>-"),
     );
+
     for post in &posts {
         bar.set_message(format!("Processing post: {}", post.title));
 
-        // Create a new page and add content
-        let (page, layer) = doc.add_page(Mm(210.0), Mm(297.0), "Post Layer");
-        add_text_to_pdf(&doc, page, layer, &post.title, 30, true)?;
-        add_text_to_pdf(&doc, page, layer, &post.date, 12, true)?;
-        add_text_to_pdf(&doc, page, layer, &post.content, 12, false)?;
+        let title_style = style::Style::new().with_font_size(24).bold();
+        let title_element = elements::Paragraph::new(post.title.clone().replace("&amp;", "&"))
+            .aligned(Alignment::Left)
+            .styled(title_style);
+        doc.push(title_element);
 
-        // Download and add images
-        for image_url in &post.images {
-            bar.set_message(format!("Downloading image for: {}", post.title));
-            if let Ok(image_data) = download_image(image_url) {
-                add_image_to_pdf(&doc, page, layer, &image_data)?;
-            }
-        }
+        let date_style = style::Style::new().with_font_size(12);
+        let date_element = elements::Paragraph::new(post.date.clone())
+            .aligned(Alignment::Left)
+            .styled(date_style);
+        doc.push(date_element);
 
-        bar.inc(1); // Move progress bar forward
+        doc.push(elements::Break::new(1));
+        let content_lines = post.content.lines(); 
+        for line in content_lines {
+            let content_element = elements::Paragraph::new(line.replace("&amp;", "&").to_string());
+            doc.push(content_element);
+        }        
+
+        // Add images (commented out as per your request)
+        // for image_url in &post.images {
+        //     bar.set_message(format!("Downloading image for: {}", post.title));
+        //     if let Ok(image_data) = download_image(image_url) {
+        //         let image = genpdf::elements::Image::from_dynamic_image(image::load_from_memory(&image_data)?)?;
+        //         page.push(image);
+        //     }
+        // }
+
+        bar.inc(1);
     }
 
     bar.finish_with_message("PDF generation complete!");
 
     let output_file = File::create("Blog.pdf")?;
-    doc.save(&mut std::io::BufWriter::new(output_file))?;
+    doc.render(&mut std::io::BufWriter::new(output_file))?;
 
     Ok(())
 }
 
-fn add_text_to_pdf(
-    doc: &PdfDocumentReference,
-    page: PdfPageIndex,
-    layer: PdfLayerIndex,
-    text: &str,
-    font_size: i64,
-    bold: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let current_layer = doc.get_page(page).get_layer(layer.clone());
-    let font = doc.add_builtin_font(if bold {
-        BuiltinFont::HelveticaBold
-    } else {
-        BuiltinFont::Helvetica
-    })?;
-    current_layer.use_text(text, font_size as f32, Mm(10.0), Mm(10.0), &font);
-    Ok(())
-}
-
-fn download_image(url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let response = blocking::get(url)?;
-    Ok(response.bytes()?.to_vec())
-}
-
-fn add_image_to_pdf(
-    doc: &PdfDocumentReference,
-    page: PdfPageIndex,
-    layer: PdfLayerIndex,
-    image_data: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let image = image::ImageReader::new(std::io::Cursor::new(image_data))
-        .with_guessed_format()?
-        .decode()?
-        .to_rgb8();
-
-    let (img_width, img_height) = image.dimensions();
-
-    // Convert the image into raw pixel data
-    let img_data = image.into_raw();
-
-    // Create an ImageXObject for the PDF using the raw pixel data
-    let pdf_image = ImageXObject {
-        width: Px(img_width as usize),
-        height: Px(img_height as usize),
-        color_space: printpdf::ColorSpace::Rgb,
-        bits_per_component: ColorBits::Bit8,
-        interpolate: true,
-        image_data: img_data,
-        image_filter: None,
-        smask: None,
-        clipping_bbox: None,
-    };
-
-    let final_image = printpdf::Image::from(pdf_image);
-
-    // Place the image on the specified layer
-    let current_layer = doc.get_page(page).get_layer(layer);
-    final_image.add_to_layer(current_layer.clone(), ImageTransform::default());
-
-    Ok(())
-}
+// fn download_image(url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//     let response = reqwest::blocking::get(url)?;
+//     Ok(response.bytes()?.to_vec())
+// }
