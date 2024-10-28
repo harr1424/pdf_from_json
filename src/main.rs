@@ -77,7 +77,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue; // images with alpha channel not supported
                     }
                     let image = genpdf::elements::Image::from_dynamic_image(image_data)?
-                        .with_alignment(genpdf::Alignment::Center);
+                        .with_alignment(genpdf::Alignment::Center)
+                        .with_scale(genpdf::Scale::new(3, 3));
 
                     doc.push(image);
                 }
@@ -90,7 +91,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 continue; // images with alpha channel not supported
                             }
                             let image = genpdf::elements::Image::from_dynamic_image(loaded_image)?
-                                .with_alignment(genpdf::Alignment::Center);
+                                .with_alignment(genpdf::Alignment::Center)
+                                .with_scale(genpdf::Scale::new(3, 3));
+
                             doc.push(image);
                         }
                         Err(e) => {
