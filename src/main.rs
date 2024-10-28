@@ -1,6 +1,7 @@
 use chrono::NaiveDate;
 use genpdf::{elements, style, Alignment, Element};
 use indicatif::{ProgressBar, ProgressStyle};
+use regex::Regex;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -20,6 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image_data: HashMap<String, Vec<u8>> = load_image_data("images.bin")?;
     let mut posts: Vec<Post> = serde_json::from_reader(File::open("backup.json")?)?;
     posts.sort_by_key(|post| NaiveDate::parse_from_str(&post.date, "%A %d %B %Y").ok());
+
+    let newlines_re = Regex::new(r"\s*\n\s*").unwrap();
 
     let font_family =
         genpdf::fonts::from_files("./fonts", "OpenSans", None).expect("Failed to load font family");
@@ -43,6 +46,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for post in &posts {
         bar.set_message(format!("Processing post: {}", post.title));
 
+        doc.push(elements::PageBreak::new());
+
         let title_style = style::Style::new().with_font_size(24).bold();
         let title_element = elements::Paragraph::new(post.title.clone().replace("&amp;", "&"))
             .aligned(Alignment::Left)
@@ -56,13 +61,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         doc.push(date_element);
 
         doc.push(elements::Break::new(1));
-        let content_lines = post.content.lines();
+        let cleaned_content = newlines_re.replace_all(&post.content, "\n");
+        let content_lines = cleaned_content.lines();
         for line in content_lines {
             let content_element = elements::Paragraph::new(line.replace("&amp;", "&").to_string());
             doc.push(content_element);
         }
 
         for image_url in &post.images {
+            doc.push(elements::Break::new(1));
             match image_data.get(image_url) {
                 Some(image_data) => {
                     let image_data = image::load_from_memory(&image_data)?;
@@ -98,8 +105,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     bar.finish_with_message("PDF generation complete!");
-    println!("Saving PDF, this may take a few minutes...");
-    let output_file = File::create("Blog1.pdf")?;
+    println!("Rendering and saving PDF, this may take a few minutes...");
+    let output_file = File::create("Blog.pdf")?;
     doc.render(&mut std::io::BufWriter::new(output_file))?;
     println!("All done!");
 
