@@ -1,4 +1,3 @@
-use chrono::NaiveDate;
 use genpdf::{elements, style, Alignment, Element};
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
@@ -20,7 +19,7 @@ struct Post {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image_data: HashMap<String, Vec<u8>> = load_image_data("images.bin")?;
     let mut posts: Vec<Post> = serde_json::from_reader(File::open("backup.json")?)?;
-    posts.sort_by_key(|post| NaiveDate::parse_from_str(&post.date, "%A %d %B %Y").ok());
+    posts.reverse();
 
     let newlines_re = Regex::new(r"\s*\n\s*").unwrap();
 
@@ -114,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("All done!");
 
     Ok(())
-}
+} 
 
 fn load_image_data(path: &str) -> io::Result<HashMap<String, Vec<u8>>> {
     let mut file = File::open(path)?;
